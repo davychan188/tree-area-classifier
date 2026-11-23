@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木區域自動分類工具 v14</title>
+<title>樹木區域自動分類工具 v15</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
@@ -59,10 +59,36 @@
   #searchInfo { margin-top: 4px; font-weight: bold; color: #1e4d3a; min-height: 1.2em; }
   tr.search-hit td { background: #f3e0c8; }
   tr.search-focus td { background: #f0c28a; }
+
+  .leaflet-pane.tg-labels-pane { z-index: 650; pointer-events: none; }
+  .tg-label {
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+  .tg-label span {
+    display: inline-block;
+    transform: translate(-50%, -50%);
+    font-weight: 700;
+    font-size: 13px;
+    line-height: 1;
+    color: #1e4d3a;
+    white-space: nowrap;
+    pointer-events: none;
+    text-shadow:
+      0 0 3px #fff, 0 0 6px #fff,
+      1px 0 0 #fff, -1px 0 0 #fff,
+      0 1px 0 #fff, 0 -1px 0 #fff,
+      1px 1px 0 #fff, -1px -1px 0 #fff;
+  }
+  .tg-label-hit span { color: #7a2e12; font-size: 16px; }
+  .tg-label-dim span { opacity: 0.35; }
 </style>
 </head>
 <body>
-<h1>樹木區域自動分類工具 v14</h1>
+<h1>樹木區域自動分類工具 v15</h1>
 <p>每個區域檔的檔名會成為結果的一欄。若 DXF 內含 Tree Group 標籤（例如 Group867），結果欄會自動命名為 Tree_Group。同一檔內若重疊，採用先載入的區域。樹木座標可上傳或直接貼上 Tree_No、X、Y。</p>
 
 <div class="section">
@@ -76,6 +102,7 @@
     <li>GeoPackage 會讀取 Polygon、MultiPolygon（含內環）；多圖層時先勾選</li>
     <li>分類使用檔案原始座標，地圖與 KML 才依所選座標系轉換</li>
     <li>可用搜尋欄輸入 Tree Group（例如 TG774、Group805）或 Tree No（例如 TG-T0078、0078），地圖會放大並標示，結果表亦會篩選</li>
+    <li>地圖上每個區域會直接顯示 TG 編號（例如 TG774），無需點擊；搜尋時配對到的編號會較大、較顯眼</li>
   </ul>
 </div>
 
@@ -153,7 +180,7 @@ Group209,825100.5,840150.2</pre>
   </div>
   <div id="searchInfo"></div>
   <div id="map"></div>
-  <p class="hint">輸入組號或樹木編號後，地圖會標示並放大至結果。點擊結果表的列亦可定位該棵樹。可切換右上角圖層。</p>
+  <p class="hint">區域會直接顯示 TG 編號。輸入組號或樹木編號後，地圖會標示並放大至結果。點擊結果表的列亦可定位該棵樹。可切換右上角圖層。</p>
 </div>
 
 <div class="section">
@@ -252,6 +279,8 @@ L.control.layers({
   "OpenStreetMap (Carto)": osm,
   "衛星影像": satellite
 }, { "香港地名標籤": hkLabel }, { collapsed: false }).addTo(map);
+map.createPane("tgLabels");
+map.getPane("tgLabels").classList.add("tg-labels-pane");
 let areaLayer = L.layerGroup().addTo(map);
 let treeLayer = L.layerGroup().addTo(map);
 
@@ -280,6 +309,49 @@ function groupDigits(s) {
   const n = normText(s);
   const m = n.match(/^(?:GROUP|TG)?(\d+)$/);
   return m ? (m[1].replace(/^0+/, "") || "0") : null;
+}
+function displayGroupLabel(name) {
+  const d = groupDigits(name);
+  if (d) return "TG" + d;
+  return String(name || "");
+}
+function areaLabelLatLng(a, areaCRS) {
+  try {
+    const feature = a.parts.length === 1 ? turf.polygon(a.parts[0]) : turf.multiPolygon(a.parts);
+    const c = turf.centroid(feature).geometry.coordinates;
+    return toWGS84(c[0], c[1], areaCRS);
+  } catch (e) {
+    try {
+      const ring = a.parts[0][0];
+      let sx = 0, sy = 0, n = 0;
+      ring.forEach(([x, y]) => { sx += x; sy += y; n++; });
+      if (!n) return null;
+      return toWGS84(sx / n, sy / n, areaCRS);
+    } catch (e2) { return null; }
+  }
+}
+function makeTgLabel(a, areaCRS) {
+  const text = displayGroupLabel(a.name);
+  const ll = areaLabelLatLng(a, areaCRS);
+  if (!text || !ll) return null;
+  return L.marker(ll, {
+    icon: L.divIcon({
+      className: "tg-label",
+      html: "<span>" + esc(text) + "</span>",
+      iconSize: [0, 0],
+      iconAnchor: [0, 0]
+    }),
+    pane: "tgLabels",
+    interactive: false,
+    keyboard: false
+  });
+}
+function setLabelState(marker, hit, searching) {
+  if (!marker) return;
+  const el = marker.getElement();
+  if (!el) return;
+  el.classList.toggle("tg-label-hit", !!(searching && hit));
+  el.classList.toggle("tg-label-dim", !!(searching && !hit));
 }
 function isBarePrefix(q) {
   return /^(TG|GROUP|T|G)$/.test(normText(q));
@@ -349,9 +421,16 @@ function applySearch(opts) {
   const searching = found.active;
   const hitAreas = new Set(found.areaHits.map(a => a.name));
   const hitTreeNos = new Set(found.treeHits.map(t => String(t.treeNo)));
+  const labelled = new Set();
   areaPolys.forEach(item => {
-    item.poly.setStyle(areaStyle(hitAreas.has(item.area.name), searching));
-    if (searching && hitAreas.has(item.area.name)) item.poly.bringToFront();
+    const hit = hitAreas.has(item.area.name);
+    item.poly.setStyle(areaStyle(hit, searching));
+    if (searching && hit) item.poly.bringToFront();
+    if (item.label && !labelled.has(item.label)) {
+      labelled.add(item.label);
+      setLabelState(item.label, hit, searching);
+      if (searching && hit) item.label.bringToFront();
+    }
   });
   treeMarkers.forEach(item => {
     const hit = hitTreeNos.has(String(item.t.treeNo));
@@ -423,6 +502,8 @@ function drawOnMap() {
   const treeCRS = document.getElementById("treeCRS").value;
   const bounds = [];
   areas.forEach(a => {
+    const label = makeTgLabel(a, areaCRS);
+    if (label) areaLayer.addLayer(label);
     (a.parts || []).forEach(rings => {
       const latlngs = rings.map(ring => ring.map(([x, y]) => {
         const ll = toWGS84(x, y, areaCRS);
@@ -430,9 +511,10 @@ function drawOnMap() {
         return ll;
       }));
       if (!latlngs[0] || latlngs[0].length < 3) return;
-      const poly = L.polygon(latlngs, areaStyle(false, false)).bindPopup("<b>區域：" + esc(a.name) + "</b><br>來源：" + esc(a.sourceLabel || ""));
+      const popupName = displayGroupLabel(a.name) || a.name;
+      const poly = L.polygon(latlngs, areaStyle(false, false)).bindPopup("<b>區域：" + esc(popupName) + "</b><br>來源：" + esc(a.sourceLabel || ""));
       areaLayer.addLayer(poly);
-      areaPolys.push({ area: a, poly: poly });
+      areaPolys.push({ area: a, poly: poly, label: label });
     });
   });
   const pts = lastResults.length ? lastResults : trees;
