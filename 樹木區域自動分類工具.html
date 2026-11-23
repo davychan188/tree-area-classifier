@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木區域自動分類工具 v16</title>
+<title>樹木區域自動分類工具 v17</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
@@ -60,6 +60,7 @@
   .tg-toggle { display: flex; align-items: center; gap: 8px; font-weight: bold; min-height: 40px; margin: 0; cursor: pointer; user-select: none; }
   .tg-toggle input { width: 20px; height: 20px; accent-color: #1e4d3a; flex-shrink: 0; }
   #searchInfo { margin-top: 4px; font-weight: bold; color: #1e4d3a; min-height: 1.2em; }
+  .search-tools { position: sticky; top: 0; z-index: 1200; background: #fffcf8; padding: 4px 0 8px; }
   tr.search-hit td { background: #f3e0c8; }
   tr.search-focus td { background: #f0c28a; }
 
@@ -91,7 +92,7 @@
 </style>
 </head>
 <body>
-<h1>樹木區域自動分類工具 v16</h1>
+<h1>樹木區域自動分類工具 v17</h1>
 <p>每個區域檔的檔名會成為結果的一欄。若 DXF 內含 Tree Group 標籤（例如 Group867），結果欄會自動命名為 Tree_Group。同一檔內若重疊，採用先載入的區域。樹木座標可上傳或直接貼上 Tree_No、X、Y。</p>
 
 <div class="section">
@@ -175,6 +176,7 @@ Group209,825100.5,840150.2</pre>
 
 <div class="section">
   <h2>地圖預覽</h2>
+  <div class="search-tools">
   <label for="searchInput">搜尋 Tree Group 或 Tree No</label>
   <div class="search-row">
     <input type="search" id="searchInput" placeholder="例如 TG774、Group805、TG-T0078、0078" autocomplete="off" enterkeyhint="search">
@@ -183,6 +185,7 @@ Group209,825100.5,840150.2</pre>
     <label class="tg-toggle" for="showTgLabels"><input type="checkbox" id="showTgLabels" checked>顯示 TG 編號</label>
   </div>
   <div id="searchInfo"></div>
+  </div>
   <div id="map"></div>
   <p class="hint">可用「顯示 TG 編號」選擇在地圖上顯示或隱藏組號。輸入組號或樹木編號後，地圖會標示並放大至結果。點擊結果表的列亦可定位該棵樹。可切換右上角圖層。</p>
 </div>
@@ -333,7 +336,7 @@ function normText(s) {
 }
 function groupDigits(s) {
   const n = normText(s);
-  const m = n.match(/^(?:GROUP|TG)?(\d+)$/);
+  const m = n.match(/^(?:GROUP|TG)?(\d+)$/) || n.match(/(?:GROUP|TG)(\d+)/);
   return m ? (m[1].replace(/^0+/, "") || "0") : null;
 }
 function displayGroupLabel(name) {
@@ -439,76 +442,96 @@ function treeStyle(hit, searching) {
   if (searching) return { radius: 4, color: "#b5522a", fillColor: "#b5522a", fillOpacity: 0.25, weight: 1, opacity: 0.3 };
   return { radius: 5, color: "#b5522a", fillColor: "#b5522a", fillOpacity: 0.9, weight: 1, opacity: 1 };
 }
-function applySearch(opts) {
-  const input = document.getElementById("searchInput");
+function setSearchInfo(text) {
   const info = document.getElementById("searchInfo");
-  const q = input ? input.value : "";
-  const found = findMatches(q);
-  const searching = found.active;
-  const hitAreas = new Set(found.areaHits.map(a => a.name));
-  const hitTreeNos = new Set(found.treeHits.map(t => String(t.treeNo)));
-  const labelled = new Set();
-  areaPolys.forEach(item => {
-    const hit = hitAreas.has(item.area.name);
-    item.poly.setStyle(areaStyle(hit, searching));
-    if (searching && hit) item.poly.bringToFront();
-    if (item.label && !labelled.has(item.label)) {
-      labelled.add(item.label);
-      setLabelState(item.label, hit, searching);
-      if (searching && hit) item.label.bringToFront();
+  if (info) info.textContent = text || "";
+}
+function applySearch(opts) {
+  opts = opts || {};
+  try {
+    const input = document.getElementById("searchInput");
+    const q = input ? input.value : "";
+    const found = findMatches(q);
+    if (!opts.skipDraw && String(q).trim() && (areas.length || trees.length) && !areaPolys.length && !treeMarkers.length) {
+      drawOnMap();
+      return findMatches(q);
     }
-  });
-  treeMarkers.forEach(item => {
-    const hit = hitTreeNos.has(String(item.t.treeNo));
-    item.marker.setStyle(treeStyle(hit, searching));
-    if (hit && searching) item.marker.bringToFront();
-  });
-  const table = document.getElementById("resultTable");
-  if (table) {
-    table.querySelectorAll("tr[data-tree-no]").forEach(row => {
-      const hit = searching && hitTreeNos.has(row.getAttribute("data-tree-no"));
-      row.classList.toggle("search-hit", hit);
-      row.hidden = !!(searching && !hit);
+    const searching = found.active;
+    const hitAreas = new Set(found.areaHits.map(a => a.name));
+    const hitTreeNos = new Set(found.treeHits.map(t => String(t.treeNo)));
+    const labelled = new Set();
+    areaPolys.forEach(item => {
+      const hit = hitAreas.has(item.area.name);
+      item.poly.setStyle(areaStyle(hit, searching));
+      if (searching && hit) item.poly.bringToFront();
+      if (item.label && !labelled.has(item.label)) {
+        labelled.add(item.label);
+        setLabelState(item.label, hit, searching);
+        if (searching && hit) item.label.bringToFront();
+      }
     });
-  }
-  if (info) {
-    if (found.prefixOnly) info.textContent = "請再輸入組號或樹木編號，例如 TG774 或 TG-T0078";
-    else if (!String(q).trim()) info.textContent = "";
-    else if (!found.treeHits.length && !found.areaHits.length) info.textContent = "找不到「" + q.trim() + "」";
+    treeMarkers.forEach(item => {
+      const hit = hitTreeNos.has(String(item.t.treeNo));
+      item.marker.setStyle(treeStyle(hit, searching));
+      if (hit && searching) item.marker.bringToFront();
+    });
+    const table = document.getElementById("resultTable");
+    if (table) {
+      table.querySelectorAll("tr[data-tree-no]").forEach(row => {
+        const hit = searching && hitTreeNos.has(row.getAttribute("data-tree-no"));
+        row.classList.toggle("search-hit", hit);
+        row.hidden = !!(searching && !hit);
+      });
+    }
+    if (found.prefixOnly) setSearchInfo("請再輸入組號或樹木編號，例如 TG774 或 TG-T0078");
+    else if (!String(q).trim()) setSearchInfo("");
+    else if (!areas.length && !trees.length) setSearchInfo("請先上傳區域或樹木資料，再搜尋");
+    else if (!found.treeHits.length && !found.areaHits.length) setSearchInfo("找不到「" + q.trim() + "」");
     else {
       const bits = [];
-      if (found.areaHits.length) bits.push(found.areaHits.length + " 個區域（" + found.areaHits.map(a => a.name).join("、") + "）");
+      if (found.areaHits.length) bits.push(found.areaHits.length + " 個區域（" + found.areaHits.map(a => displayGroupLabel(a.name) || a.name).join("、") + "）");
       if (found.treeHits.length) bits.push(found.treeHits.length + " 棵樹");
-      info.textContent = "找到 " + bits.join("，");
+      setSearchInfo("找到 " + bits.join("，"));
     }
-  }
-  const skipFit = opts && opts.skipFit;
-  if (!skipFit && searching && (found.treeHits.length || found.areaHits.length)) {
-    const b = L.latLngBounds([]);
-    areaPolys.forEach(item => { if (hitAreas.has(item.area.name)) b.extend(item.poly.getBounds()); });
-    treeMarkers.forEach(item => { if (hitTreeNos.has(String(item.t.treeNo))) b.extend(item.marker.getLatLng()); });
-    if (b.isValid()) map.fitBounds(b, { padding: [40, 40], maxZoom: found.treeHits.length === 1 && !found.areaHits.length ? 19 : 18 });
-    const exactTrees = found.treeHits.filter(t => {
-      const nq = normText(q);
-      const nt = normText(t.treeNo);
-      return nt === nq || nt.replace(/^TG/, "") === nq;
-    });
-    const focus = exactTrees.length === 1 ? exactTrees[0] : (found.treeHits.length === 1 && !found.areaHits.length ? found.treeHits[0] : null);
-    if (focus) {
-      const item = treeMarkers.find(m => String(m.t.treeNo) === String(focus.treeNo));
-      if (item) item.marker.openPopup();
-      if (table) {
-        table.querySelectorAll("tr[data-tree-no]").forEach(row => {
-          row.classList.toggle("search-focus", row.getAttribute("data-tree-no") === String(focus.treeNo));
-        });
+    const skipFit = opts.skipFit;
+    if (!skipFit && searching && (found.treeHits.length || found.areaHits.length)) {
+      const latlngs = [];
+      areaPolys.forEach(item => { if (hitAreas.has(item.area.name)) {
+        const b = item.poly.getBounds();
+        if (b && b.isValid()) { latlngs.push(b.getSouthWest()); latlngs.push(b.getNorthEast()); }
+      } });
+      treeMarkers.forEach(item => { if (hitTreeNos.has(String(item.t.treeNo))) latlngs.push(item.marker.getLatLng()); });
+      if (latlngs.length) {
+        map.invalidateSize();
+        map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: found.treeHits.length === 1 && !found.areaHits.length ? 19 : 18 });
+        const mapEl = document.getElementById("map");
+        if (mapEl && mapEl.scrollIntoView) mapEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
       }
-    } else if (table) {
+      const exactTrees = found.treeHits.filter(t => {
+        const nq = normText(q);
+        const nt = normText(t.treeNo);
+        return nt === nq || nt.replace(/^TG/, "") === nq;
+      });
+      const focus = exactTrees.length === 1 ? exactTrees[0] : (found.treeHits.length === 1 && !found.areaHits.length ? found.treeHits[0] : null);
+      if (focus) {
+        const item = treeMarkers.find(m => String(m.t.treeNo) === String(focus.treeNo));
+        if (item) item.marker.openPopup();
+        if (table) {
+          table.querySelectorAll("tr[data-tree-no]").forEach(row => {
+            row.classList.toggle("search-focus", row.getAttribute("data-tree-no") === String(focus.treeNo));
+          });
+        }
+      } else if (table) {
+        table.querySelectorAll("tr.search-focus").forEach(row => row.classList.remove("search-focus"));
+      }
+    } else if (!searching && table) {
       table.querySelectorAll("tr.search-focus").forEach(row => row.classList.remove("search-focus"));
     }
-  } else if (!searching && table) {
-    table.querySelectorAll("tr.search-focus").forEach(row => row.classList.remove("search-focus"));
+    return found;
+  } catch (err) {
+    setSearchInfo("搜尋失敗：" + (err && err.message ? err.message : err));
+    return { active: false, query: "", prefixOnly: false, treeHits: [], areaHits: [], pts: [] };
   }
-  return found;
 }
 function focusTree(treeNo) {
   const item = treeMarkers.find(m => String(m.t.treeNo) === String(treeNo));
@@ -554,7 +577,7 @@ function drawOnMap() {
   });
   applyTgLabelVisibility();
   const q = (document.getElementById("searchInput") || {}).value || "";
-  if (String(q).trim() && !isBarePrefix(q) && normText(q).length >= 2) applySearch();
+  if (String(q).trim() && !isBarePrefix(q) && normText(q).length >= 2) applySearch({ skipDraw: true });
   else if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
 }
 
@@ -1588,28 +1611,43 @@ document.getElementById("exportGpkgBtn").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("showTgLabels").addEventListener("change", () => {
-  saveTgLabelPref();
-  applyTgLabelVisibility();
-});
-
-let searchTimer = null;
-document.getElementById("searchInput").addEventListener("input", () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => applySearch(), 150);
-});
-document.getElementById("searchInput").addEventListener("keydown", ev => {
-  if (ev.key === "Enter") { ev.preventDefault(); applySearch(); }
-});
-document.getElementById("searchBtn").addEventListener("click", () => applySearch());
-document.getElementById("searchClearBtn").addEventListener("click", () => {
-  document.getElementById("searchInput").value = "";
-  applySearch();
-  const bounds = [];
-  areaPolys.forEach(item => bounds.push(item.poly.getBounds()));
-  treeMarkers.forEach(item => bounds.push(item.marker.getLatLng()));
-  if (bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [30, 30] });
-});
+(function setupSearch() {
+  const showEl = document.getElementById("showTgLabels");
+  if (showEl) showEl.addEventListener("change", () => {
+    saveTgLabelPref();
+    applyTgLabelVisibility();
+  });
+  const input = document.getElementById("searchInput");
+  const btn = document.getElementById("searchBtn");
+  const clearBtn = document.getElementById("searchClearBtn");
+  let searchTimer = null;
+  function runSearch(immediate) {
+    clearTimeout(searchTimer);
+    if (immediate) applySearch();
+    else searchTimer = setTimeout(() => applySearch(), 150);
+  }
+  if (input) {
+    input.addEventListener("input", () => runSearch(false));
+    input.addEventListener("change", () => runSearch(true));
+    input.addEventListener("search", () => runSearch(true));
+    input.addEventListener("keydown", ev => {
+      if (ev.key === "Enter") { ev.preventDefault(); runSearch(true); }
+    });
+  }
+  if (btn) btn.addEventListener("click", ev => { ev.preventDefault(); runSearch(true); });
+  if (clearBtn) clearBtn.addEventListener("click", ev => {
+    ev.preventDefault();
+    if (input) input.value = "";
+    applySearch();
+    const latlngs = [];
+    areaPolys.forEach(item => {
+      const b = item.poly.getBounds();
+      if (b && b.isValid()) { latlngs.push(b.getSouthWest()); latlngs.push(b.getNorthEast()); }
+    });
+    treeMarkers.forEach(item => latlngs.push(item.marker.getLatLng()));
+    if (latlngs.length) map.fitBounds(L.latLngBounds(latlngs), { padding: [30, 30] });
+  });
+})();
 
 document.getElementById("clearBtn").addEventListener("click", () => {
   trees = []; areas = []; sources = []; lastResults = []; areaNotes = [];
