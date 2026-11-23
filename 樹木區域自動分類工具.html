@@ -1,0 +1,1525 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>樹木區域自動分類工具 v14</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
+<style>
+  body { font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; margin: 16px; background: #f3f0e8; color: #1a2420; }
+  h1 { color: #1e4d3a; border-bottom: 2px solid #1e4d3a; padding-bottom: 8px; margin-top: 0; }
+  .section { background: #fffcf8; padding: 16px; margin-bottom: 16px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+  button { background: #1e4d3a; color: #fffcf8; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; margin: 4px 4px 4px 0; font-size: 14px; min-height: 40px; }
+  button:hover { background: #16392b; }
+  button:disabled { background: #bdc3c7; cursor: not-allowed; }
+  button.secondary { background: #5c675f; }
+  button.secondary:hover { background: #3e4641; }
+  button.success { background: #1e4d3a; }
+  button.warning { background: #b5522a; }
+  button.warning:hover { background: #8c3e1e; }
+  button.small { padding: 4px 10px; min-height: 28px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  th, td { border: 1px solid #e3dccf; padding: 6px 8px; text-align: left; }
+  th { background: #1e4d3a; color: #fffcf8; }
+  tr:nth-child(even) { background: #efeae0; }
+  .info { color: #1e4d3a; font-weight: bold; }
+  #resultCount { font-weight: bold; color: #1e4d3a; margin: 8px 0; }
+  #map { height: 720px; width: 100%; border-radius: 8px; border: 1px solid #e3dccf; }
+  .file-input { margin: 8px 0; }
+  pre { background: #efeae0; padding: 8px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+  .flex { display: flex; gap: 16px; flex-wrap: wrap; }
+  .flex > div { flex: 1; min-width: 280px; }
+  label { display: block; margin: 6px 0 3px; font-weight: bold; font-size: 14px; }
+  input[type="text"], select, textarea { padding: 6px 10px; width: 100%; max-width: 100%; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: inherit; font-size: 13px; }
+  select, input[type="text"] { max-width: 300px; }
+  textarea { min-height: 110px; max-width: 100%; background: #fffcf8; }
+  .tabs { display: flex; margin-bottom: 8px; flex-wrap: wrap; }
+  .tab { padding: 6px 14px; cursor: pointer; border: 1px solid #e3dccf; background: #efeae0; border-radius: 6px 6px 0 0; margin-right: 4px; }
+  .tab.active { background: #1e4d3a; color: #fffcf8; border-color: #1e4d3a; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .hint { color: #5c675f; font-size: 0.85em; margin-top: 4px; }
+  .export-box { background: #efeae0; padding: 10px; border-radius: 6px; margin-top: 8px; }
+  .source { display: flex; justify-content: space-between; gap: 8px; align-items: center; background: #efeae0; border-radius: 6px; padding: 6px 8px; margin-top: 6px; }
+  .modal { position: fixed; inset: 0; background: rgba(26,36,32,0.45); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 3000; }
+  .modal[hidden] { display: none; }
+  .modal-card { background: #fffcf8; border-radius: 10px; padding: 16px; width: min(520px, 100%); max-height: 85vh; overflow: auto; }
+  .layer-row { display: flex; gap: 8px; align-items: flex-start; padding: 8px; background: #efeae0; border-radius: 6px; margin: 6px 0; }
+  .toolbar { margin: 8px 0; }
+  .flash { color: #1e4d3a; font-weight: bold; margin-left: 6px; }
+  [hidden] { display: none !important; }
+
+  .search-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 4px; }
+  .search-row input[type="search"] { flex: 1; min-width: 200px; max-width: none; min-height: 40px; font-size: 16px; }
+  #searchInfo { margin-top: 4px; font-weight: bold; color: #1e4d3a; min-height: 1.2em; }
+  tr.search-hit td { background: #f3e0c8; }
+  tr.search-focus td { background: #f0c28a; }
+</style>
+</head>
+<body>
+<h1>樹木區域自動分類工具 v14</h1>
+<p>每個區域檔的檔名會成為結果的一欄。若 DXF 內含 Tree Group 標籤（例如 Group867），結果欄會自動命名為 Tree_Group。同一檔內若重疊，採用先載入的區域。樹木座標可上傳或直接貼上 Tree_No、X、Y。</p>
+
+<div class="section">
+  <h2>使用說明</h2>
+  <ul>
+    <li>區域檔可多選，後續再選的檔案會累加，不會覆蓋先前的區域</li>
+    <li>一般檔名（去掉副檔名）會變成結果欄，例如 Tree_Group、Batch_Area；含 Group 標籤的 DXF 則固定使用 Tree_Group</li>
+    <li>同一檔內多邊形若重疊，採用先載入的區域；不同檔案會各自判斷</li>
+    <li>DXF 會讀取封閉多邊形，並以圖層內的 Group 文字命名。若多邊形 X 座標多為負值且像香港格網，會自動將 X 鏡射為正值</li>
+    <li>沒有被任何樹群多邊形包含的樹木會列為「未分類」，不會用最近標籤硬套</li>
+    <li>GeoPackage 會讀取 Polygon、MultiPolygon（含內環）；多圖層時先勾選</li>
+    <li>分類使用檔案原始座標，地圖與 KML 才依所選座標系轉換</li>
+    <li>可用搜尋欄輸入 Tree Group（例如 TG774、Group805）或 Tree No（例如 TG-T0078、0078），地圖會放大並標示，結果表亦會篩選</li>
+  </ul>
+</div>
+
+<div class="flex">
+  <div class="section">
+    <h2>1. 上傳樹木座標檔</h2>
+    <input type="file" id="treeFile" accept=".csv,.txt" class="file-input">
+    <label for="treePaste">或直接貼上 Tree_No, X, Y（逗號或 Tab，可從 Excel 複製）：</label>
+    <textarea id="treePaste" placeholder="Tree_No,X,Y&#10;T001,825100.50,840150.20"></textarea>
+    <button type="button" id="treePasteBtn">載入貼上內容</button>
+    <button type="button" id="copyTreesBtn" disabled>複製 Tree_No, X, Y</button>
+    <span id="treeCopyMsg" class="flash"></span>
+    <div id="treeInfo" class="info"></div>
+    <p class="hint">會自動辨識 Tree_No / Tree ID / 編號、X / Easting / E、Y / Northing / N。沒有表頭但有三欄（編號, X, Y）亦可。</p>
+    <label>樹木座標系：</label>
+    <select id="treeCRS">
+      <option value="4326">WGS84 經緯度</option>
+      <option value="2326" selected>HK1980 Grid</option>
+    </select>
+  </div>
+
+  <div class="section">
+    <h2>2. 上傳區域檔（可多個）</h2>
+    <div class="tabs">
+      <div class="tab active" data-tab="dxf">DXF</div>
+      <div class="tab" data-tab="csv">CSV</div>
+      <div class="tab" data-tab="gpkg">GPKG</div>
+    </div>
+    <div id="tab-dxf" class="tab-content active">
+      <input type="file" id="dxfFile" accept=".dxf" class="file-input" multiple>
+      <label>只讀取特定圖層（可選）：</label>
+      <input type="text" id="layerFilter" placeholder="例如 ACM890-16_">
+      <p class="hint">匯入時會嘗試以 Group 標籤命名多邊形。多圖層時會先出現選擇視窗，並預先勾選樹群範圍圖層（例如 ACM890-*）。</p>
+    </div>
+    <div id="tab-csv" class="tab-content">
+      <pre>Area_No,X,Y
+Group209,825100.5,840150.2</pre>
+      <input type="file" id="areaCsvFile" accept=".csv,.txt" class="file-input" multiple>
+    </div>
+    <div id="tab-gpkg" class="tab-content">
+      <input type="file" id="gpkgFile" accept=".gpkg" class="file-input" multiple>
+      <p class="hint">檔名會變成結果欄。多圖層檔案會出現選擇視窗，可同時選多個檔。</p>
+    </div>
+    <label>區域座標系：</label>
+    <select id="areaCRS">
+      <option value="4326">WGS84 經緯度</option>
+      <option value="2326" selected>HK1980 Grid</option>
+    </select>
+    <div id="areaInfo" class="info"></div>
+    <div id="areaSources"></div>
+  </div>
+</div>
+
+<div class="section">
+  <button type="button" id="previewBtn" disabled class="success">預覽到地圖</button>
+  <button type="button" id="processBtn" disabled>開始分類</button>
+  <button type="button" id="downloadBtn" disabled>下載結果 CSV</button>
+  <div class="export-box">
+    <button type="button" id="exportKmlBtn" disabled class="warning">匯出 KML</button>
+    <button type="button" id="exportGpkgBtn" disabled class="warning">匯出 GPKG</button>
+    <button type="button" id="exportPolyBtn" disabled class="secondary">匯出多邊形 CSV</button>
+  </div>
+  <button type="button" id="clearBtn" class="secondary">清除全部</button>
+  <div id="resultCount"></div>
+  <p class="hint">多邊形 CSV 欄位：Area_No, Part, Ring, X, Y。Part 從 1 起算，Ring 0 為外圈。</p>
+</div>
+
+<div class="section">
+  <h2>地圖預覽</h2>
+  <label for="searchInput">搜尋 Tree Group 或 Tree No</label>
+  <div class="search-row">
+    <input type="search" id="searchInput" placeholder="例如 TG774、Group805、TG-T0078、0078" autocomplete="off" enterkeyhint="search">
+    <button type="button" id="searchBtn">搜尋</button>
+    <button type="button" id="searchClearBtn" class="secondary">清除搜尋</button>
+  </div>
+  <div id="searchInfo"></div>
+  <div id="map"></div>
+  <p class="hint">輸入組號或樹木編號後，地圖會標示並放大至結果。點擊結果表的列亦可定位該棵樹。可切換右上角圖層。</p>
+</div>
+
+<div class="section">
+  <h2>分類結果</h2>
+  <div id="resultToolbar" class="toolbar"></div>
+  <div id="resultTable"></div>
+</div>
+
+<div id="layerModal" class="modal" hidden>
+  <div class="modal-card">
+    <h3 id="layerTitle">選擇要匯入的圖層</h3>
+    <p id="layerHint" class="hint"></p>
+    <div id="layerList"></div>
+    <p id="layerError" class="info"></p>
+    <button type="button" id="layerAll" class="secondary">全選</button>
+    <button type="button" id="layerCancel" class="secondary">取消</button>
+    <button type="button" id="layerOk">匯入所選</button>
+  </div>
+</div>
+
+<script>
+proj4.defs("EPSG:2326", "+proj=tmerc +lat_0=22.31213333333334 +lon_0=114.1785555555556 +k=1 +x_0=836694.05 +y_0=819069.8 +ellps=intl +towgs84=-162.619,-276.959,-161.764,0.067753,-2.24365,-1.15883,-1.09425 +units=m +no_defs");
+proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+let trees = [], areas = [], sources = [], lastResults = [];
+let treeMarkers = [], areaPolys = [];
+let seq = 1;
+let layerResolve = null;
+let layerCancelMode = "abort";
+let sqlJsReady = null;
+let areaNotes = [];
+let copyTimer = null;
+
+function initSQL() {
+  if (!sqlJsReady) sqlJsReady = initSqlJs({ locateFile: f => "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/" + f });
+  return sqlJsReady;
+}
+function esc(value) {
+  return String(value)
+    .replaceAll("&", "&" + "amp;")
+    .replaceAll("<", "&" + "lt;")
+    .replaceAll(">", "&" + "gt;")
+    .replaceAll('"', "&" + "quot;");
+}
+function uniqueName(base, used) {
+  let name = base, n = 1;
+  while (used.has(name)) name = base + "_" + (n++);
+  used.add(name);
+  return name;
+}
+function usedNames() {
+  return new Set(areas.map(a => a.name));
+}
+function fileCategory(fileName) {
+  const base = String(fileName || "").split(/[/\\]/).pop() || "區域";
+  const dot = base.lastIndexOf(".");
+  const stem = (dot > 0 ? base.slice(0, dot) : base).trim();
+  return stem || "區域";
+}
+function resultCategories(list) {
+  const seen = new Set();
+  const out = [];
+  (list || areas).forEach(a => {
+    const category = a.category || "區域";
+    if (seen.has(category)) return;
+    seen.add(category);
+    out.push(category);
+  });
+  return out;
+}
+function treePopup(t) {
+  let html = "<b>樹木：" + esc(t.treeNo) + "</b>";
+  const groups = t.groups || null;
+  if (groups && Object.keys(groups).length) {
+    Object.keys(groups).forEach(key => { html += "<br>" + esc(key) + "：" + esc(groups[key]); });
+  } else if (t.area) html += "<br>區域：" + esc(t.area);
+  return html;
+}
+
+const map = L.map("map").setView([22.49, 114.07], 14);
+const osm = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+  attribution: "&copy; OpenStreetMap &copy; CARTO", maxZoom: 20, subdomains: "abcd"
+});
+const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  attribution: "Esri", maxZoom: 19
+});
+const hkMap = L.tileLayer("https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/basemap/WGS84/{z}/{x}/{y}.png", {
+  attribution: "地政總署 GeoInfo Map", maxZoom: 20
+});
+const hkLabel = L.tileLayer("https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/label/hk/tc/WGS84/{z}/{x}/{y}.png", {
+  attribution: "地政總署", maxZoom: 20
+});
+hkMap.addTo(map);
+L.control.layers({
+  "香港地圖 (GeoInfo)": hkMap,
+  "OpenStreetMap (Carto)": osm,
+  "衛星影像": satellite
+}, { "香港地名標籤": hkLabel }, { collapsed: false }).addTo(map);
+let areaLayer = L.layerGroup().addTo(map);
+let treeLayer = L.layerGroup().addTo(map);
+
+function toWGS84(x, y, crs) {
+  if (crs === "4326") return [y, x];
+  try {
+    const ll = proj4("EPSG:" + crs, "EPSG:4326", [x, y]);
+    return [ll[1], ll[0]];
+  } catch (e) { return [y, x]; }
+}
+function clearMapLayers() {
+  areaLayer.clearLayers();
+  treeLayer.clearLayers();
+  treeMarkers = [];
+  areaPolys = [];
+}
+function treeGroupValues(t) {
+  if (t && t.groups && Object.keys(t.groups).length) return Object.values(t.groups);
+  if (t && t.area) return [t.area];
+  return [];
+}
+function normText(s) {
+  return String(s || "").toUpperCase().replace(/[\s_\-]+/g, "");
+}
+function groupDigits(s) {
+  const n = normText(s);
+  const m = n.match(/^(?:GROUP|TG)?(\d+)$/);
+  return m ? (m[1].replace(/^0+/, "") || "0") : null;
+}
+function isBarePrefix(q) {
+  return /^(TG|GROUP|T|G)$/.test(normText(q));
+}
+function isGroupQuery(q) {
+  const n = normText(q);
+  return /^(GROUP|TG)\d+$/.test(n) || groupDigits(q) !== null && /^(GROUP|TG)\d+$/.test(n);
+}
+function matchesGroupName(name, q) {
+  const raw = String(q || "").trim();
+  if (!raw) return false;
+  const nq = normText(raw);
+  const nn = normText(name);
+  if (!nq || !nn || isBarePrefix(raw)) return false;
+  if (String(name).indexOf(raw) !== -1 || raw.indexOf(String(name)) !== -1) return true;
+  if (nn.indexOf(nq) !== -1) return true;
+  const d1 = groupDigits(name);
+  const d2 = groupDigits(raw);
+  if (d1 && d2 && d1 === d2) return true;
+  if (name === "未分類" && (raw.indexOf("未分類") !== -1 || nq === "UNCLASSIFIED")) return true;
+  return false;
+}
+function matchesTreeNo(t, q) {
+  const raw = String(q || "").trim();
+  if (!raw || isBarePrefix(raw)) return false;
+  const nq = normText(raw);
+  const nt = normText(t.treeNo);
+  if (!nq || !nt) return false;
+  if (nt === nq) return true;
+  const tpart = nt.replace(/^TG/, "");
+  if (tpart === nq) return true;
+  if (/^(GROUP|TG)\d+$/.test(nq)) return false;
+  if (nt.indexOf(nq) !== -1 || tpart.indexOf(nq) !== -1) return true;
+  const num = (nt.match(/(\d+)$/) || [])[1];
+  const qnum = (nq.match(/(\d+)$/) || [])[1];
+  if (num && qnum && (/^\d+$/.test(nq) || /T\d+$/.test(nq))) {
+    if (num === qnum || (num.replace(/^0+/, "") || "0") === (qnum.replace(/^0+/, "") || "0")) return true;
+  }
+  return false;
+}
+function findMatches(q) {
+  const raw = String(q || "").trim();
+  const pts = lastResults.length ? lastResults : trees;
+  const tooShort = !isBarePrefix(raw) && raw && normText(raw).length < 2;
+  if (!raw || isBarePrefix(raw) || tooShort) {
+    return { active: false, query: raw, prefixOnly: !!(raw && (isBarePrefix(raw) || tooShort)), treeHits: [], areaHits: [], pts: pts };
+  }
+  const areaHits = areas.filter(a => matchesGroupName(a.name, raw));
+  const treeHits = pts.filter(t => matchesTreeNo(t, raw) || treeGroupValues(t).some(g => matchesGroupName(g, raw)));
+  return { active: true, query: raw, prefixOnly: false, treeHits: treeHits, areaHits: areaHits, pts: pts };
+}
+function areaStyle(hit, searching) {
+  if (searching && hit) return { color: "#b5522a", weight: 3, fillColor: "#d4a017", fillOpacity: 0.45 };
+  if (searching) return { color: "#1e4d3a", weight: 1, fillColor: "#1e4d3a", fillOpacity: 0.08 };
+  return { color: "#1e4d3a", weight: 1.5, fillColor: "#1e4d3a", fillOpacity: 0.25 };
+}
+function treeStyle(hit, searching) {
+  if (searching && hit) return { radius: 8, color: "#7a2e12", fillColor: "#e8a317", fillOpacity: 1, weight: 2, opacity: 1 };
+  if (searching) return { radius: 4, color: "#b5522a", fillColor: "#b5522a", fillOpacity: 0.25, weight: 1, opacity: 0.3 };
+  return { radius: 5, color: "#b5522a", fillColor: "#b5522a", fillOpacity: 0.9, weight: 1, opacity: 1 };
+}
+function applySearch(opts) {
+  const input = document.getElementById("searchInput");
+  const info = document.getElementById("searchInfo");
+  const q = input ? input.value : "";
+  const found = findMatches(q);
+  const searching = found.active;
+  const hitAreas = new Set(found.areaHits.map(a => a.name));
+  const hitTreeNos = new Set(found.treeHits.map(t => String(t.treeNo)));
+  areaPolys.forEach(item => {
+    item.poly.setStyle(areaStyle(hitAreas.has(item.area.name), searching));
+    if (searching && hitAreas.has(item.area.name)) item.poly.bringToFront();
+  });
+  treeMarkers.forEach(item => {
+    const hit = hitTreeNos.has(String(item.t.treeNo));
+    item.marker.setStyle(treeStyle(hit, searching));
+    if (hit && searching) item.marker.bringToFront();
+  });
+  const table = document.getElementById("resultTable");
+  if (table) {
+    table.querySelectorAll("tr[data-tree-no]").forEach(row => {
+      const hit = searching && hitTreeNos.has(row.getAttribute("data-tree-no"));
+      row.classList.toggle("search-hit", hit);
+      row.hidden = !!(searching && !hit);
+    });
+  }
+  if (info) {
+    if (found.prefixOnly) info.textContent = "請再輸入組號或樹木編號，例如 TG774 或 TG-T0078";
+    else if (!String(q).trim()) info.textContent = "";
+    else if (!found.treeHits.length && !found.areaHits.length) info.textContent = "找不到「" + q.trim() + "」";
+    else {
+      const bits = [];
+      if (found.areaHits.length) bits.push(found.areaHits.length + " 個區域（" + found.areaHits.map(a => a.name).join("、") + "）");
+      if (found.treeHits.length) bits.push(found.treeHits.length + " 棵樹");
+      info.textContent = "找到 " + bits.join("，");
+    }
+  }
+  const skipFit = opts && opts.skipFit;
+  if (!skipFit && searching && (found.treeHits.length || found.areaHits.length)) {
+    const b = L.latLngBounds([]);
+    areaPolys.forEach(item => { if (hitAreas.has(item.area.name)) b.extend(item.poly.getBounds()); });
+    treeMarkers.forEach(item => { if (hitTreeNos.has(String(item.t.treeNo))) b.extend(item.marker.getLatLng()); });
+    if (b.isValid()) map.fitBounds(b, { padding: [40, 40], maxZoom: found.treeHits.length === 1 && !found.areaHits.length ? 19 : 18 });
+    const exactTrees = found.treeHits.filter(t => {
+      const nq = normText(q);
+      const nt = normText(t.treeNo);
+      return nt === nq || nt.replace(/^TG/, "") === nq;
+    });
+    const focus = exactTrees.length === 1 ? exactTrees[0] : (found.treeHits.length === 1 && !found.areaHits.length ? found.treeHits[0] : null);
+    if (focus) {
+      const item = treeMarkers.find(m => String(m.t.treeNo) === String(focus.treeNo));
+      if (item) item.marker.openPopup();
+      if (table) {
+        table.querySelectorAll("tr[data-tree-no]").forEach(row => {
+          row.classList.toggle("search-focus", row.getAttribute("data-tree-no") === String(focus.treeNo));
+        });
+      }
+    } else if (table) {
+      table.querySelectorAll("tr.search-focus").forEach(row => row.classList.remove("search-focus"));
+    }
+  } else if (!searching && table) {
+    table.querySelectorAll("tr.search-focus").forEach(row => row.classList.remove("search-focus"));
+  }
+  return found;
+}
+function focusTree(treeNo) {
+  const item = treeMarkers.find(m => String(m.t.treeNo) === String(treeNo));
+  if (!item) return;
+  map.setView(item.marker.getLatLng(), Math.max(map.getZoom(), 18));
+  item.marker.openPopup();
+  const table = document.getElementById("resultTable");
+  if (table) {
+    table.querySelectorAll("tr[data-tree-no]").forEach(row => {
+      row.classList.toggle("search-focus", row.getAttribute("data-tree-no") === String(treeNo));
+    });
+  }
+}
+function drawOnMap() {
+  clearMapLayers();
+  const areaCRS = document.getElementById("areaCRS").value;
+  const treeCRS = document.getElementById("treeCRS").value;
+  const bounds = [];
+  areas.forEach(a => {
+    (a.parts || []).forEach(rings => {
+      const latlngs = rings.map(ring => ring.map(([x, y]) => {
+        const ll = toWGS84(x, y, areaCRS);
+        bounds.push(ll);
+        return ll;
+      }));
+      if (!latlngs[0] || latlngs[0].length < 3) return;
+      const poly = L.polygon(latlngs, areaStyle(false, false)).bindPopup("<b>區域：" + esc(a.name) + "</b><br>來源：" + esc(a.sourceLabel || ""));
+      areaLayer.addLayer(poly);
+      areaPolys.push({ area: a, poly: poly });
+    });
+  });
+  const pts = lastResults.length ? lastResults : trees;
+  pts.forEach(t => {
+    const ll = toWGS84(t.x, t.y, treeCRS);
+    bounds.push(ll);
+    const marker = L.circleMarker(ll, treeStyle(false, false)).bindPopup(treePopup(t));
+    marker.on("click", () => focusTree(t.treeNo));
+    treeLayer.addLayer(marker);
+    treeMarkers.push({ t: t, marker: marker });
+  });
+  const q = (document.getElementById("searchInput") || {}).value || "";
+  if (String(q).trim() && !isBarePrefix(q) && normText(q).length >= 2) applySearch();
+  else if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
+}
+
+function closeRing(ring) {
+  if (!ring || ring.length < 3) return ring ? ring.slice() : [];
+  const out = ring.map(([x, y]) => [x, y]);
+  const a = out[0], b = out[out.length - 1];
+  if (Math.abs(a[0] - b[0]) > 1e-8 || Math.abs(a[1] - b[1]) > 1e-8) out.push([a[0], a[1]]);
+  else out[out.length - 1] = [a[0], a[1]];
+  return out;
+}
+function normalizeParts(parts) {
+  const polygons = [];
+  (parts || []).forEach(rings => {
+    if (!rings || !rings.length) return;
+    const outer = closeRing(rings[0]);
+    if (outer.length < 4) return;
+    const holes = rings.slice(1).map(closeRing).filter(r => r.length >= 4);
+    polygons.push([outer].concat(holes));
+  });
+  return polygons.length ? polygons : null;
+}
+function toBytes(blob) {
+  if (!blob) return null;
+  if (blob instanceof Uint8Array) return blob;
+  if (blob instanceof ArrayBuffer) return new Uint8Array(blob);
+  if (Array.isArray(blob)) return new Uint8Array(blob);
+  return null;
+}
+function readGeom(view, offset) {
+  if (offset + 5 > view.byteLength) return { geom: null, offset: offset };
+  const little = view.getUint8(offset) === 1;
+  let type = view.getUint32(offset + 1, little);
+  offset += 5;
+  if (type & 0x20000000) offset += 4;
+  let hasZ = (type & 0x80000000) !== 0;
+  let hasM = (type & 0x40000000) !== 0;
+  let base = type & 0x0fffffff;
+  if (base >= 3000) { hasZ = true; hasM = true; base -= 3000; }
+  else if (base >= 2000) { hasM = true; base -= 2000; }
+  else if (base >= 1000) { hasZ = true; base -= 1000; }
+  const dims = 2 + (hasZ ? 1 : 0) + (hasM ? 1 : 0);
+  const u32 = () => { const n = view.getUint32(offset, little); offset += 4; return n; };
+  const readRing = () => {
+    const count = u32();
+    const ring = [];
+    for (let i = 0; i < count; i++) {
+      if (offset + dims * 8 > view.byteLength) break;
+      ring.push([view.getFloat64(offset, little), view.getFloat64(offset + 8, little)]);
+      offset += dims * 8;
+    }
+    return ring;
+  };
+  if (base === 1) { offset += dims * 8; return { geom: { polygons: [] }, offset: offset }; }
+  if (base === 2) { const count = u32(); offset += count * dims * 8; return { geom: { polygons: [] }, offset: offset }; }
+  if (base === 3) {
+    const ringCount = u32();
+    const rings = [];
+    for (let r = 0; r < ringCount; r++) rings.push(readRing());
+    return { geom: { polygons: [rings] }, offset: offset };
+  }
+  if (base === 4 || base === 5 || base === 6 || base === 7) {
+    const count = u32();
+    const polygons = [];
+    for (let i = 0; i < count; i++) {
+      const child = readGeom(view, offset);
+      offset = child.offset;
+      if (!child.geom) return { geom: null, offset: offset };
+      polygons.push.apply(polygons, child.geom.polygons);
+    }
+    return { geom: { polygons: polygons }, offset: offset };
+  }
+  return { geom: null, offset: offset };
+}
+function parseGpkgGeometry(blob) {
+  const bytes = toBytes(blob);
+  if (!bytes || bytes.length < 5) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 0;
+  if (bytes.length >= 8 && view.getUint8(0) === 0x47 && view.getUint8(1) === 0x50) {
+    const flags = view.getUint8(3);
+    if ((flags & 0x10) !== 0 || (flags & 0x20) !== 0) return null;
+    const envelope = (flags >> 1) & 0x07;
+    let header = 8;
+    if (envelope === 1) header += 32;
+    else if (envelope === 2 || envelope === 3) header += 48;
+    else if (envelope === 4) header += 64;
+    else if (envelope !== 0) return null;
+    offset = header;
+  }
+  const parsed = readGeom(view, offset);
+  if (!parsed.geom) return null;
+  const polygons = parsed.geom.polygons.filter(rings => rings.length && rings[0].length >= 3);
+  return polygons.length ? { polygons: polygons } : null;
+}
+function areaFromPolygons(name, polygons, sourceLabel) {
+  const parts = normalizeParts(polygons);
+  if (!parts) return null;
+  return { name: name, parts: parts, sourceLabel: sourceLabel };
+}
+
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
+  });
+});
+
+function detectDelim(text) {
+  const first = String(text || "").replace(/^\uFEFF/, "").split(/\r?\n/).find(l => l.trim()) || "";
+  const tabs = (first.match(/\t/g) || []).length;
+  const commas = (first.match(/,/g) || []).length;
+  return tabs > commas ? "\t" : ",";
+}
+function splitLine(line, delim) {
+  if (delim === "\t") return line.split("\t").map(v => v.trim());
+  const out = [];
+  let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ",") { out.push(cur.trim()); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+function parseCSV(text) {
+  const parsed = parseTable(text, { requireHeader: true });
+  if (!parsed.rows.length) return [];
+  return parsed.rows;
+}
+function looksNumeric(s) {
+  const t = String(s ?? "").trim();
+  if (!t) return false;
+  return Number.isFinite(Number(t.replace(/,/g, "")));
+}
+const TREE_ID_CANDS = ["tree_no", "treeno", "tree no", "tree id", "treeid", "tree_id", "tree", "編號", "樹木編號", "id", "name"];
+const X_CANDS = ["x", "east", "easting", "e"];
+const Y_CANDS = ["y", "north", "northing", "n"];
+function findCol(headers, cands) {
+  const m = {};
+  headers.forEach(h => m[String(h).trim().toLowerCase()] = h);
+  for (const c of cands) if (m[c.toLowerCase()]) return m[c.toLowerCase()];
+  return null;
+}
+function isHeaderRow(cells) {
+  const lower = cells.map(c => String(c).trim().toLowerCase());
+  return !!(findCol(lower, TREE_ID_CANDS) && findCol(lower, X_CANDS) && findCol(lower, Y_CANDS));
+}
+function parseTable(text, opts) {
+  const requireHeader = opts && opts.requireHeader;
+  const raw = String(text || "").replace(/^\uFEFF/, "");
+  const lines = raw.split(/\r?\n/).filter(l => l.trim());
+  if (!lines.length) return { rows: [], headers: [], error: "沒有內容" };
+  const delim = detectDelim(raw);
+  const first = splitLine(lines[0], delim);
+  let headers, start;
+  if (isHeaderRow(first)) {
+    headers = first;
+    start = 1;
+  } else if (!requireHeader && first.length >= 3 && looksNumeric(first[1]) && looksNumeric(first[2])) {
+    headers = ["Tree_No", "X", "Y"];
+    start = 0;
+  } else if (requireHeader) {
+    headers = first;
+    start = 1;
+  } else if (first.length >= 3) {
+    headers = ["Tree_No", "X", "Y"];
+    start = 0;
+  } else {
+    return { rows: [], headers: first, error: "找不到欄位" };
+  }
+  const rows = lines.slice(start).map(line => {
+    const vals = splitLine(line, delim);
+    const row = {};
+    headers.forEach((h, i) => { row[h] = vals[i] || ""; });
+    return row;
+  });
+  return { rows: rows, headers: headers, error: null };
+}
+function rowsToTrees(rows, headers) {
+  const h = headers && headers.length ? headers : Object.keys(rows[0] || {});
+  const tc = findCol(h, TREE_ID_CANDS);
+  const xc = findCol(h, X_CANDS);
+  const yc = findCol(h, Y_CANDS);
+  if (!tc || !xc || !yc) return { trees: [], error: "找不到欄位（需要 Tree_No / Tree ID、X、Y）" };
+  const list = rows.map(r => ({
+    treeNo: String(r[tc] == null ? "" : r[tc]).trim(),
+    x: parseFloat(String(r[xc]).replace(/,/g, "")),
+    y: parseFloat(String(r[yc]).replace(/,/g, ""))
+  })).filter(t => t.treeNo && !isNaN(t.x) && !isNaN(t.y));
+  if (!list.length) return { trees: [], error: "沒有有效的樹木座標列" };
+  return { trees: list, error: null };
+}
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? '"' + text.replaceAll('"', '""') + '"' : text;
+}
+function treesToCsv(list) {
+  let csv = "\uFEFFTree_No,X,Y\n";
+  (list || []).forEach(t => { csv += [t.treeNo, t.x, t.y].map(csvCell).join(",") + "\n"; });
+  return csv;
+}
+function flashMsg(id, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  if (copyTimer) clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => { el.textContent = ""; }, 1800);
+}
+async function copyText(text, msgId, okText) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
+    else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    flashMsg(msgId, okText || "已複製");
+    return true;
+  } catch (err) {
+    flashMsg(msgId, "複製失敗");
+    return false;
+  }
+}
+function loadTreesFromText(text, sourceLabel) {
+  try {
+    const parsed = parseTable(text, { requireHeader: false });
+    if (parsed.error && !parsed.rows.length) {
+      document.getElementById("treeInfo").innerHTML = esc(parsed.error);
+      return;
+    }
+    const got = rowsToTrees(parsed.rows, parsed.headers);
+    if (got.error) {
+      document.getElementById("treeInfo").innerHTML = esc(got.error);
+      return;
+    }
+    trees = got.trees;
+    lastResults = [];
+    window.results = null;
+    document.getElementById("downloadBtn").disabled = true;
+    document.getElementById("resultTable").innerHTML = "";
+    document.getElementById("resultToolbar").innerHTML = "";
+    document.getElementById("resultCount").innerHTML = "";
+    document.getElementById("treeInfo").innerHTML = "已載入 " + trees.length + " 棵樹" + (sourceLabel ? "（" + esc(sourceLabel) + "）" : "");
+    updateUI();
+  } catch (err) {
+    document.getElementById("treeInfo").innerHTML = "失敗：" + esc(err.message || err);
+  }
+}
+
+function renderSources() {
+  const host = document.getElementById("areaSources");
+  host.innerHTML = sources.map(s =>
+    '<div class="source"><span>' + esc(s.label) + " · " + esc(s.detail) + " · " + s.count + " 區 · 結果欄 " + esc(s.category || fileCategory(s.label)) + '</span><button type="button" class="secondary" data-remove="' + s.id + '">移除</button></div>'
+  ).join("");
+  host.querySelectorAll("[data-remove]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-remove");
+      sources = sources.filter(s => s.id !== id);
+      areas = areas.filter(a => a.sourceId !== id);
+      renderSources();
+      updateUI();
+    });
+  });
+}
+function updateUI() {
+  const base = areas.length ? ("已載入 " + areas.length + " 個區域（" + sources.length + " 個來源）") : "";
+  const extra = areaNotes.length ? ((base ? "<br>" : "") + areaNotes.map(esc).join("<br>")) : "";
+  document.getElementById("areaInfo").innerHTML = base + extra;
+  const hasData = areas.length || trees.length;
+  document.getElementById("previewBtn").disabled = !hasData;
+  document.getElementById("processBtn").disabled = !(trees.length && areas.length);
+  document.getElementById("exportKmlBtn").disabled = !hasData;
+  document.getElementById("exportGpkgBtn").disabled = !hasData;
+  document.getElementById("exportPolyBtn").disabled = !areas.length;
+  const copyBtn = document.getElementById("copyTreesBtn");
+  if (copyBtn) copyBtn.disabled = !trees.length;
+}
+function addAreas(list, source) {
+  if (!list.length) return;
+  const id = "s" + (seq++);
+  const category = source.category || fileCategory(source.label);
+  source.id = id;
+  source.category = category;
+  list.forEach(a => { a.sourceId = id; a.category = category; });
+  areas = areas.concat(list);
+  sources.push(source);
+  renderSources();
+  updateUI();
+}
+
+document.getElementById("treeFile").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    loadTreesFromText(await file.text(), file.name);
+  } catch (err) {
+    document.getElementById("treeInfo").innerHTML = "失敗：" + esc(err.message || err);
+  }
+});
+document.getElementById("treePasteBtn").addEventListener("click", () => {
+  const text = document.getElementById("treePaste").value;
+  if (!String(text).trim()) {
+    document.getElementById("treeInfo").innerHTML = "請先貼上 Tree_No, X, Y";
+    return;
+  }
+  loadTreesFromText(text, "貼上內容");
+});
+document.getElementById("copyTreesBtn").addEventListener("click", () => {
+  if (!trees.length) return;
+  copyText(treesToCsv(trees), "treeCopyMsg", "已複製 " + trees.length + " 棵");
+});
+
+function ringGap(ring) {
+  if (!ring || ring.length < 2) return Infinity;
+  const a = ring[0], b = ring[ring.length - 1];
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+function isClosedRing(ent, ring) {
+  if (!ring || ring.length < 3) return false;
+  const flag = Number(ent.flag != null ? ent.flag : (ent.flags != null ? ent.flags : 0)) || 0;
+  if (ent.shape || ent.closed || (flag & 1)) return true;
+  const gap = ringGap(ring);
+  if (gap <= 0.05) return true;
+  return ring.length >= 3 && gap <= 0.05;
+}
+function shouldFlipX(ring) {
+  if (!ring || !ring.length) return false;
+  const neg = ring.filter(p => p[0] < 0).length;
+  if (neg * 2 < ring.length) return false;
+  const mag = ring.reduce((s, p) => s + Math.abs(p[0]), 0) / ring.length;
+  return mag >= 1e5 && mag <= 1e7;
+}
+function shoelaceArea(ring) {
+  const closed = closeRing(ring);
+  if (closed.length < 4) return 0;
+  let s = 0;
+  for (let i = 0; i < closed.length - 1; i++) s += closed[i][0] * closed[i + 1][1] - closed[i + 1][0] * closed[i][1];
+  return Math.abs(s) / 2;
+}
+function uniqueVertices(ring) {
+  const out = [];
+  (ring || []).forEach(p => {
+    const prev = out[out.length - 1];
+    if (!prev || Math.abs(prev[0] - p[0]) > 1e-9 || Math.abs(prev[1] - p[1]) > 1e-9) out.push([p[0], p[1]]);
+  });
+  return out;
+}
+function ringBBox(ring) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  ring.forEach(([x, y]) => {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  });
+  return [minX, minY, maxX, maxY];
+}
+function pointInBBox(x, y, bbox, pad) {
+  const p = pad || 0;
+  return x >= bbox[0] - p && x <= bbox[2] + p && y >= bbox[1] - p && y <= bbox[3] + p;
+}
+function cleanMText(s) {
+  let t = String(s || "");
+  t = t.replace(/\\[Pp]/g, " ");
+  t = t.replace(/\\[A-Za-z][^;]*;/g, "");
+  t = t.replace(/[{}]/g, "");
+  t = t.replace(/\s+/g, " ").trim();
+  t = t.replace(/Grou[p]?\s*(\d+)/ig, "Group$1");
+  return t;
+}
+function normalizeGroupName(text) {
+  const cleaned = cleanMText(text);
+  const m = cleaned.match(/Group\s*\d+/i);
+  if (!m) return null;
+  return "Group" + m[0].match(/\d+/)[0];
+}
+function entityXY(ent) {
+  const p = ent.position || ent.startPoint || ent.endPoint || null;
+  const x = p && p.x != null ? p.x : ent.x;
+  const y = p && p.y != null ? p.y : ent.y;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return [x, y];
+}
+function layerFamily(layer) {
+  const s = String(layer || "").toUpperCase();
+  const off = s.indexOf("OFF") >= 0;
+  let kind = null;
+  if (s.indexOf("040") >= 0) kind = "040";
+  else if (s.indexOf("890") >= 0) kind = "890";
+  let series = null;
+  if (/890-16|040-16/.test(s)) series = "16";
+  else if (/890-89|040-89/.test(s)) series = "89";
+  else if (/(^|[^0-9])16([^0-9]|$)/.test(s)) series = "16";
+  else if (/(^|[^0-9])89([^0-9]|$)/.test(s)) series = "89";
+  return { kind: kind, series: series, off: off };
+}
+function familyScore(labelLayer, polyLayer) {
+  const a = layerFamily(labelLayer), b = layerFamily(polyLayer);
+  let score = 0;
+  if (a.series && a.series === b.series) score += 2;
+  if (a.off === b.off) score += 1;
+  if (a.kind === "040" && b.kind === "890") score += 1;
+  return score;
+}
+function isTreeGroupBoundaryLayer(layer) {
+  return /890/i.test(layer || "");
+}
+function turfRingFeature(ring) {
+  try {
+    const closed = closeRing(ring);
+    if (closed.length < 4) return null;
+    return turf.polygon([closed]);
+  } catch (e) {
+    return null;
+  }
+}
+function parseDxfEntities(text) {
+  const dxf = new DxfParser().parseSync(text);
+  const entities = (dxf && dxf.entities) || [];
+  const rings = [];
+  const labels = [];
+  let flipped = 0, openSkipped = 0, tinySkipped = 0;
+  entities.forEach(ent => {
+    if (ent.type === "MTEXT" || ent.type === "TEXT") {
+      const name = normalizeGroupName(ent.text || "");
+      const xy = entityXY(ent);
+      if (name && xy) labels.push({ name: name, layer: ent.layer || "", x: xy[0], y: xy[1] });
+      return;
+    }
+    if (ent.type !== "LWPOLYLINE" && ent.type !== "POLYLINE") return;
+    let verts = (ent.vertices || []).map(v => [Number(v.x), Number(v.y)]).filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    let flippedThis = false;
+    if (shouldFlipX(verts)) {
+      verts = verts.map(([x, y]) => [-x, y]);
+      flippedThis = true;
+    }
+    if (!isClosedRing(ent, verts)) { openSkipped++; return; }
+    const uniq = uniqueVertices(verts);
+    const closed = closeRing(uniq);
+    if (closed.length < 4) { tinySkipped++; return; }
+    const area = shoelaceArea(closed);
+    if (area < 0.5) { tinySkipped++; return; }
+    if (flippedThis) flipped++;
+    rings.push({
+      layer: ent.layer || "0",
+      ring: closed,
+      area: area,
+      bbox: ringBBox(closed),
+      flipped: flippedThis,
+      name: null,
+      byGroup: false
+    });
+  });
+  return { rings: rings, labels: labels, flipped: flipped, openSkipped: openSkipped, tinySkipped: tinySkipped };
+}
+function nameDxfRings(rings, labels) {
+  rings.forEach(r => {
+    r.feature = turfRingFeature(r.ring);
+    r.inside = [];
+  });
+  labels.forEach((lab, j) => {
+    const pt = turf.point([lab.x, lab.y]);
+    rings.forEach((r, i) => {
+      if (!pointInBBox(lab.x, lab.y, r.bbox, 0.05)) return;
+      if (!r.feature) return;
+      try {
+        if (turf.booleanPointInPolygon(pt, r.feature)) r.inside.push(j);
+      } catch (e) {}
+    });
+  });
+  const assign = new Map();
+  labels.forEach((lab, j) => {
+    const cands = [];
+    rings.forEach((r, i) => { if (r.inside.indexOf(j) >= 0) cands.push(i); });
+    if (!cands.length) return;
+    cands.sort((i, k) => {
+      const sa = familyScore(lab.layer, rings[i].layer);
+      const sb = familyScore(lab.layer, rings[k].layer);
+      if (sb !== sa) return sb - sa;
+      return rings[i].area - rings[k].area;
+    });
+    const i = cands[0];
+    if (!assign.has(i)) assign.set(i, []);
+    assign.get(i).push(j);
+  });
+  rings.forEach((r, i) => {
+    const js = assign.get(i) || [];
+    if (!js.length) return;
+    js.sort((a, b) => {
+      const sa = familyScore(labels[a].layer, r.layer);
+      const sb = familyScore(labels[b].layer, r.layer);
+      if (sb !== sa) return sb - sa;
+      return String(labels[a].name).localeCompare(String(labels[b].name));
+    });
+    r.name = labels[js[0]].name;
+    r.byGroup = true;
+  });
+  let fb = 0;
+  rings.forEach(r => {
+    if (r.name) return;
+    fb++;
+    const layer = r.layer;
+    const base = (layer && !["0", "DEFPOINTS"].includes(String(layer).toUpperCase())) ? layer : ("Area_" + fb);
+    r.name = base;
+    r.byGroup = false;
+  });
+  return rings;
+}
+function areasFromNamedRings(rings, fileName, used) {
+  const order = [];
+  const grouped = new Map();
+  rings.forEach(r => {
+    const key = r.name;
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+      order.push(key);
+    }
+    grouped.get(key).push(r);
+  });
+  const batch = [];
+  order.forEach(name => {
+    const list = grouped.get(name);
+    const polygons = list.map(item => [item.ring]);
+    const finalName = used.has(name) ? uniqueName(name, used) : (used.add(name), name);
+    const area = areaFromPolygons(finalName, polygons, fileName);
+    if (area) {
+      area.byGroup = list.some(item => item.byGroup);
+      batch.push(area);
+    }
+  });
+  return batch;
+}
+
+document.getElementById("dxfFile").addEventListener("change", async e => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  const notes = [];
+  const used = usedNames();
+  const lf = document.getElementById("layerFilter").value.trim().split(",").map(s => s.trim()).filter(Boolean);
+  for (const file of files) {
+    let parsed;
+    try { parsed = parseDxfEntities(await file.text()); }
+    catch (err) { notes.push(file.name + " 解析失敗：" + (err.message || err)); continue; }
+    let rings = parsed.rings || [];
+    if (lf.length) rings = rings.filter(r => lf.includes(r.layer));
+    if (!rings.length) { notes.push(file.name + "：沒有封閉多邊形"); continue; }
+    const byLayer = new Map();
+    rings.forEach(r => {
+      if (!byLayer.has(r.layer)) byLayer.set(r.layer, []);
+      byLayer.get(r.layer).push(r);
+    });
+    const layerStats = [...byLayer.entries()].map(([name, list]) => ({
+      table: name,
+      title: name,
+      geomType: "POLYGON",
+      count: list.length,
+      srsId: 2326,
+      precheck: isTreeGroupBoundaryLayer(name)
+    }));
+    if (!layerStats.some(l => l.precheck)) layerStats.forEach(l => { l.precheck = true; });
+    let tables;
+    if (layerStats.length === 1) tables = [layerStats[0].table];
+    else {
+      tables = await askLayers(file.name, layerStats, {
+        hint: file.name + " 含有 " + layerStats.length + " 個含封閉多邊形的圖層。已預先勾選樹群範圍圖層（例如 ACM890-*）。請確認後匯入。",
+        cancelMode: "defaults"
+      });
+      if (!tables || !tables.length) {
+        const pre = layerStats.filter(l => l.precheck).map(l => l.table);
+        tables = pre.length ? pre : layerStats.map(l => l.table);
+      }
+    }
+    const chosen = rings.filter(r => tables.includes(r.layer));
+    if (!chosen.length) { notes.push(file.name + "：沒有選取圖層"); continue; }
+    nameDxfRings(chosen, parsed.labels || []);
+    const batch = areasFromNamedRings(chosen, file.name, used);
+    if (!batch.length) { notes.push(file.name + "：沒有可用區域"); continue; }
+    const groupCount = batch.filter(a => a.byGroup).length;
+    const category = groupCount ? "Tree_Group" : fileCategory(file.name);
+    const flipNote = parsed.flipped ? ("已將 " + parsed.flipped + " 個多邊形的 X 座標鏡射為正值") : "無需鏡射 X";
+    const groupNote = groupCount ? (groupCount + " 個 Tree Group 區域") : "無 Group 標籤，已用圖層名稱";
+    const unnamed = chosen.filter(r => !r.byGroup).length;
+    const extra = unnamed ? "；另有 " + unnamed + " 個無標籤多邊形已保留" : "";
+    addAreas(batch, { label: file.name, detail: "DXF · " + flipNote + " · " + groupNote + extra, count: batch.length, category: category });
+    notes.push(file.name + "：" + flipNote + " · 匯入 " + batch.length + " 區（" + groupNote + extra + "）");
+  }
+  areaNotes = notes;
+  updateUI();
+});
+
+document.getElementById("areaCsvFile").addEventListener("change", async e => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  const notes = [];
+  try {
+    for (const file of files) {
+      const rows = parseCSV(await file.text());
+      const h = Object.keys(rows[0] || {});
+      const ac = findCol(h, ["area_no", "areano", "area", "區域", "group", "name"]);
+      const xc = findCol(h, ["x", "east", "easting", "e"]);
+      const yc = findCol(h, ["y", "north", "northing", "n"]);
+      const pc = findCol(h, ["part", "polygon"]);
+      const rc = findCol(h, ["ring", "hole"]);
+      if (!ac || !xc || !yc) { notes.push(file.name + " 找不到欄位"); continue; }
+      const groups = new Map();
+      rows.forEach(r => {
+        const n = String(r[ac]).trim();
+        const x = parseFloat(r[xc]), y = parseFloat(r[yc]);
+        if (!n || isNaN(x) || isNaN(y)) return;
+        const part = pc && r[pc] !== "" ? (parseInt(r[pc], 10) || 1) : 1;
+        const ring = rc && r[rc] !== "" ? (parseInt(r[rc], 10) || 0) : 0;
+        const key = pc ? n + "\0" + part : n;
+        if (!groups.has(key)) groups.set(key, { name: n, part: part, rings: new Map() });
+        const g = groups.get(key);
+        const pts = g.rings.get(ring) || [];
+        pts.push([x, y]);
+        g.rings.set(ring, pts);
+      });
+      const byName = new Map();
+      groups.forEach(g => {
+        if (!byName.has(g.name)) byName.set(g.name, []);
+        byName.get(g.name).push(g);
+      });
+      const batch = [];
+      byName.forEach((list, name) => {
+        list.sort((a, b) => a.part - b.part);
+        const parts = list.map(item => [...item.rings.keys()].sort((a, b) => a - b).map(id => item.rings.get(id)).filter(r => r.length >= 3)).filter(r => r.length);
+        const area = areaFromPolygons(name, parts, file.name);
+        if (area) batch.push(area);
+      });
+      if (batch.length) addAreas(batch, { label: file.name, detail: "CSV", count: batch.length });
+      else notes.push(file.name + "：沒有多邊形");
+    }
+  } catch (err) {
+    notes.push("失敗：" + (err.message || err));
+  }
+  areaNotes = notes;
+  updateUI();
+});
+
+function quoteIdent(name) { return '"' + String(name).replaceAll('"', '""') + '"'; }
+function defaultLayerOn(geomType) {
+  const kind = String(geomType || "").toUpperCase();
+  return !kind || kind === "GEOMETRY" || kind.indexOf("POLYGON") >= 0;
+}
+function inspectGpkg(db) {
+  let rows = [];
+  try {
+    const result = db.exec("SELECT c.table_name, IFNULL(NULLIF(c.identifier, ''), c.table_name), IFNULL(c.description, ''), IFNULL(g.column_name, 'geom'), IFNULL(g.geometry_type_name, ''), g.srs_id FROM gpkg_contents c LEFT JOIN gpkg_geometry_columns g ON g.table_name = c.table_name WHERE LOWER(c.data_type) = 'features'");
+    rows = result[0] ? result[0].values : [];
+  } catch (e) {
+    const result = db.exec("SELECT table_name, IFNULL(NULLIF(identifier, ''), table_name), IFNULL(description, '') FROM gpkg_contents WHERE LOWER(data_type) = 'features'");
+    rows = (result[0] ? result[0].values : []).map(row => row.concat(["geom", "", null]));
+  }
+  const layers = [];
+  const seen = new Set();
+  rows.forEach(row => {
+    const table = String(row[0] || "");
+    if (!table || seen.has(table)) return;
+    seen.add(table);
+    const geom = String(row[3] || "geom");
+    let cols = [];
+    try { cols = db.exec("PRAGMA table_info(" + quoteIdent(table) + ")")[0].values.map(r => String(r[1])); } catch (e) {}
+    const nameCol = cols.find(c => c !== geom && /name|code|group|area/i.test(c) && !/geom/i.test(c)) || cols.find(c => /id/i.test(c) && !/^(fid|ogc_fid)$/i.test(c)) || null;
+    let count = 0;
+    try { count = Number(db.exec("SELECT COUNT(*) FROM " + quoteIdent(table))[0].values[0][0]) || 0; } catch (e) {}
+    layers.push({ table: table, title: String(row[1] || table), geomColumn: geom, nameColumn: nameCol, geomType: String(row[4] || ""), srsId: row[5] == null ? null : Number(row[5]), count: count });
+  });
+  return layers;
+}
+function readLayer(db, layer, used, sourceLabel) {
+  const nameSql = layer.nameColumn ? quoteIdent(layer.nameColumn) + ", " : "";
+  const res = db.exec("SELECT " + nameSql + quoteIdent(layer.geomColumn) + " FROM " + quoteIdent(layer.table));
+  const values = res[0] ? res[0].values : [];
+  const batch = [];
+  let skipped = 0, idx = 0;
+  values.forEach(row => {
+    const explicit = layer.nameColumn ? row[0] : null;
+    const blob = layer.nameColumn ? row[1] : row[0];
+    const parsed = parseGpkgGeometry(blob);
+    const given = explicit == null ? "" : String(explicit).trim();
+    const name = given || uniqueName("Area_" + (++idx), used);
+    if (given) used.add(given);
+    const area = parsed ? areaFromPolygons(name, parsed.polygons, sourceLabel) : null;
+    if (!area) skipped++;
+    else batch.push(area);
+  });
+  return { areas: batch, skipped: skipped };
+}
+function askLayers(fileName, layers, opts) {
+  opts = opts || {};
+  return new Promise(resolve => {
+    layerResolve = resolve;
+    layerCancelMode = opts.cancelMode || "abort";
+    document.getElementById("layerTitle").textContent = "選擇要匯入的圖層";
+    document.getElementById("layerHint").textContent = opts.hint || (fileName + " 含有 " + layers.length + " 個圖層。可勾選一個或多個。只讀取 Polygon 與 MultiPolygon。");
+    document.getElementById("layerError").textContent = "";
+    document.getElementById("layerList").innerHTML = layers.map(layer => {
+      const checked = layer.precheck != null ? layer.precheck : defaultLayerOn(layer.geomType);
+      return '<label class="layer-row"><input type="checkbox" value="' + esc(layer.table) + '"' + (checked ? " checked" : "") + '><span><b>' + esc(layer.title) + "</b><br>" + esc(layer.geomType || "GEOMETRY") + " · " + layer.count + " 筆" + (layer.srsId != null ? " · EPSG:" + layer.srsId : "") + "</span></label>";
+    }).join("");
+    document.getElementById("layerModal").hidden = false;
+  });
+}
+function closeLayers(tables) {
+  document.getElementById("layerModal").hidden = true;
+  const resolve = layerResolve;
+  layerResolve = null;
+  layerCancelMode = "abort";
+  if (resolve) resolve(tables);
+}
+document.getElementById("layerCancel").addEventListener("click", () => closeLayers(null));
+document.getElementById("layerAll").addEventListener("click", () => {
+  document.querySelectorAll("#layerList input").forEach(input => { input.checked = true; });
+});
+document.getElementById("layerOk").addEventListener("click", () => {
+  const tables = [...document.querySelectorAll("#layerList input:checked")].map(input => input.value);
+  if (!tables.length) { document.getElementById("layerError").textContent = "請至少選擇一個圖層"; return; }
+  closeLayers(tables);
+});
+
+document.getElementById("gpkgFile").addEventListener("change", async e => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  const notes = [];
+  const info = document.getElementById("areaInfo");
+  info.innerHTML = "載入中...";
+  try {
+    const SQL = await initSQL();
+    const used = usedNames();
+    for (const file of files) {
+      const db = new SQL.Database(new Uint8Array(await file.arrayBuffer()));
+      try {
+        const layers = inspectGpkg(db);
+        if (!layers.length) { notes.push(file.name + "：無圖層"); continue; }
+        const tables = layers.length === 1 ? [layers[0].table] : await askLayers(file.name, layers);
+        if (!tables || !tables.length) continue;
+        tables.forEach(table => {
+          const layer = layers.find(item => item.table === table);
+          if (!layer) return;
+          const label = file.name + " · " + layer.title;
+          const read = readLayer(db, layer, used, label);
+          if (read.areas.length) addAreas(read.areas, { label: file.name, detail: layer.title, count: read.areas.length });
+          else notes.push(label + "：沒有多邊形");
+        });
+      } finally { db.close(); }
+    }
+  } catch (err) {
+    notes.push("失敗：" + (err.message || err));
+  }
+  areaNotes = notes;
+  updateUI();
+});
+
+document.getElementById("previewBtn").addEventListener("click", () => {
+  try {
+    lastResults = trees.map(t => Object.assign({}, t, { area: "" }));
+    drawOnMap();
+  } catch (err) {
+    document.getElementById("areaInfo").innerHTML = "預覽失敗：" + esc(err.message || err);
+  }
+});
+
+function visibleResults(results) {
+  const found = findMatches((document.getElementById("searchInput") || {}).value || "");
+  if (!found.active) return results;
+  const hit = new Set(found.treeHits.map(t => String(t.treeNo)));
+  return results.filter(r => hit.has(String(r.treeNo)));
+}
+function renderResults(results, categories) {
+  let toolbar = '<button type="button" id="copyAllBtn">複製全部</button><span id="resultCopyMsg" class="flash"></span>';
+  document.getElementById("resultToolbar").innerHTML = toolbar;
+  document.getElementById("copyAllBtn").addEventListener("click", () => {
+    const cols = ["Tree_No", "X", "Y"].concat(categories);
+    const rows = visibleResults(results);
+    let csv = "\uFEFF" + cols.map(csvCell).join(",") + "\n";
+    rows.forEach(r => {
+      const values = categories.map(column => (r.groups && r.groups[column]) || r.area || "未分類");
+      csv += [r.treeNo, r.x, r.y].concat(values).map(csvCell).join(",") + "\n";
+    });
+    copyText(csv, "resultCopyMsg", "已複製 " + rows.length + " 列");
+  });
+  let html = "<table><tr><th>樹木編號</th><th>X</th><th>Y</th>";
+  categories.forEach(category => { html += "<th>" + esc(category) + "</th>"; });
+  html += "<th>複製</th></tr>";
+  results.forEach((r, i) => {
+    html += "<tr data-tree-no=\"" + esc(r.treeNo) + "\" style=\"cursor:pointer\"><td>" + esc(r.treeNo) + "</td><td>" + r.x.toFixed(2) + "</td><td>" + r.y.toFixed(2) + "</td>";
+    categories.forEach(category => { html += "<td><b>" + esc((r.groups && r.groups[category]) || "未分類") + "</b></td>"; });
+    html += '<td><button type="button" class="small secondary" data-copy-row="' + i + '">複製</button></td></tr>';
+  });
+  html += "</table>";
+  document.getElementById("resultTable").innerHTML = html;
+  document.getElementById("resultTable").querySelectorAll("[data-copy-row]").forEach(btn => {
+    btn.addEventListener("click", ev => {
+      ev.stopPropagation();
+      const r = results[Number(btn.getAttribute("data-copy-row"))];
+      if (!r) return;
+      const values = [r.treeNo, r.x, r.y];
+      categories.forEach(category => {
+        const g = (r.groups && r.groups[category]) || r.area || "";
+        if (g && g !== "未分類") values.push(g);
+        else if (categories.length === 1) values.push(g || "未分類");
+      });
+      copyText(values.map(csvCell).join(","), "resultCopyMsg", "已複製 " + r.treeNo);
+    });
+  });
+  document.getElementById("resultTable").querySelectorAll("tr[data-tree-no]").forEach(row => {
+    row.addEventListener("click", () => focusTree(row.getAttribute("data-tree-no")));
+  });
+  applySearch({ skipFit: true });
+}
+
+document.getElementById("processBtn").addEventListener("click", () => {
+  try {
+    const categories = resultCategories();
+    const prepared = [];
+    areas.forEach(a => {
+      try {
+        const feature = a.parts.length === 1 ? turf.polygon(a.parts[0]) : turf.multiPolygon(a.parts);
+        prepared.push({ name: a.name, category: a.category || "區域", feature: feature });
+      } catch (e) {}
+    });
+    const results = trees.map(t => {
+      const pt = turf.point([t.x, t.y]);
+      const groups = {};
+      categories.forEach(category => { groups[category] = "未分類"; });
+      const filled = new Set();
+      let area = "未分類";
+      for (const item of prepared) {
+        if (filled.has(item.category) && area !== "未分類") continue;
+        try { if (!turf.booleanPointInPolygon(pt, item.feature)) continue; } catch (e) { continue; }
+        if (area === "未分類") area = item.name;
+        if (!filled.has(item.category)) { groups[item.category] = item.name; filled.add(item.category); }
+        if (area !== "未分類" && filled.size === categories.length) break;
+      }
+      return Object.assign({}, t, { area: area, groups: groups });
+    });
+    lastResults = results;
+    renderResults(results, categories);
+    const lines = ["完成 " + results.length + " 棵"];
+    categories.forEach(category => {
+      const cnt = {};
+      results.forEach(r => {
+        const name = (r.groups && r.groups[category]) || "未分類";
+        cnt[name] = (cnt[name] || 0) + 1;
+      });
+      const names = Object.keys(cnt);
+      if (names.length <= 16) lines.push(category + "　→　" + names.map(name => name + ":" + cnt[name]).join(" | "));
+      else {
+        const unclassified = cnt["未分類"] || 0;
+        const named = names.length - (unclassified ? 1 : 0);
+        lines.push(category + "　已分類 " + (results.length - unclassified) + "、未分類 " + unclassified + "（" + named + " 個區域）");
+      }
+    });
+    document.getElementById("resultCount").innerHTML = lines.map(esc).join("<br>");
+    window.results = results;
+    window.resultColumns = categories;
+    document.getElementById("downloadBtn").disabled = false;
+    drawOnMap();
+  } catch (err) {
+    document.getElementById("areaInfo").innerHTML = "分類失敗：" + esc(err.message || err);
+  }
+});
+
+document.getElementById("downloadBtn").addEventListener("click", () => {
+  if (!window.results) return;
+  const columns = window.resultColumns && window.resultColumns.length ? window.resultColumns : ["區域"];
+  let csv = "\uFEFF" + ["Tree_No", "X", "Y"].concat(columns).map(csvCell).join(",") + "\n";
+  window.results.forEach(r => {
+    const values = columns.map(column => (r.groups && r.groups[column]) || r.area || "未分類");
+    csv += [r.treeNo, r.x, r.y].concat(values).map(csvCell).join(",") + "\n";
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = "results.csv";
+  a.click();
+});
+
+document.getElementById("exportPolyBtn").addEventListener("click", () => {
+  try {
+    let csv = "\uFEFFArea_No,Part,Ring,X,Y\n";
+    areas.forEach(a => a.parts.forEach((rings, part) => rings.forEach((ring, ringIndex) => {
+      ring.slice(0, -1).forEach(([x, y]) => { csv += a.name + "," + (part + 1) + "," + ringIndex + "," + x + "," + y + "\n"; });
+    })));
+    const el = document.createElement("a");
+    el.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    el.download = "polygons.csv";
+    el.click();
+  } catch (err) {
+    document.getElementById("areaInfo").innerHTML = "匯出失敗：" + esc(err.message || err);
+  }
+});
+
+document.getElementById("exportKmlBtn").addEventListener("click", () => {
+  try {
+    const treeCRS = document.getElementById("treeCRS").value;
+    const areaCRS = document.getElementById("areaCRS").value;
+    const coord = (x, y, crs) => { const ll = toWGS84(x, y, crs); return ll[1] + "," + ll[0] + ",0"; };
+    let kml = '<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Tree Area</name>\n';
+    kml += '<Style id="t"><IconStyle><scale>0.7</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/red-circle.png</href></Icon></IconStyle></Style>\n';
+    kml += '<Style id="a"><LineStyle><color>ff3a4d1e</color><width>1.5</width></LineStyle><PolyStyle><color>333a4d1e</color></PolyStyle></Style>\n';
+    if (areas.length) {
+      kml += "<Folder><name>Areas</name>\n";
+      areas.forEach(a => {
+        const polygons = a.parts.map(rings => {
+          const holes = rings.slice(1).map(ring => "<innerBoundaryIs><LinearRing><coordinates>" + ring.map(([x, y]) => coord(x, y, areaCRS)).join(" ") + "</coordinates></LinearRing></innerBoundaryIs>").join("");
+          return "<Polygon><outerBoundaryIs><LinearRing><coordinates>" + rings[0].map(([x, y]) => coord(x, y, areaCRS)).join(" ") + "</coordinates></LinearRing></outerBoundaryIs>" + holes + "</Polygon>";
+        }).join("");
+        const body = a.parts.length > 1 ? "<MultiGeometry>" + polygons + "</MultiGeometry>" : polygons;
+        kml += "<Placemark><name>" + esc(a.name) + "</name><styleUrl>#a</styleUrl>" + body + "</Placemark>\n";
+      });
+      kml += "</Folder>\n";
+    }
+    const list = lastResults.length ? lastResults : trees;
+    if (list.length) {
+      kml += "<Folder><name>Trees</name>\n";
+      list.forEach(t => {
+        const ll = toWGS84(t.x, t.y, treeCRS);
+        const note = t.groups && Object.keys(t.groups).length
+          ? Object.keys(t.groups).map(key => key + ": " + t.groups[key]).join("\n")
+          : (t.area || "");
+        kml += "<Placemark><name>" + esc(t.treeNo) + "</name><description>" + esc(note) + "</description><styleUrl>#t</styleUrl><Point><coordinates>" + ll[1] + "," + ll[0] + ",0</coordinates></Point></Placemark>\n";
+      });
+      kml += "</Folder>\n";
+    }
+    kml += "</Document></kml>";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([kml], { type: "application/vnd.google-earth.kml+xml" }));
+    a.download = "tree_area.kml";
+    a.click();
+  } catch (err) {
+    document.getElementById("areaInfo").innerHTML = "匯出失敗：" + esc(err.message || err);
+  }
+});
+
+document.getElementById("exportGpkgBtn").addEventListener("click", async () => {
+  try {
+    const SQL = await initSQL();
+    const db = new SQL.Database();
+    const areaSrs = parseInt(document.getElementById("areaCRS").value, 10);
+    const treeSrs = parseInt(document.getElementById("treeCRS").value, 10);
+    db.run("CREATE TABLE gpkg_spatial_ref_sys (srs_name TEXT, srs_id INTEGER PRIMARY KEY, organization TEXT, organization_coordsys_id INTEGER, definition TEXT, description TEXT)");
+    db.run("INSERT INTO gpkg_spatial_ref_sys VALUES ('Undefined',-1,'NONE',-1,'undefined','')");
+    db.run("INSERT INTO gpkg_spatial_ref_sys VALUES ('Undefined',0,'NONE',0,'undefined','')");
+    db.run("INSERT INTO gpkg_spatial_ref_sys VALUES ('WGS 84',4326,'EPSG',4326,'GEOGCS[\"WGS 84\"]','')");
+    db.run("INSERT INTO gpkg_spatial_ref_sys VALUES ('HK1980',2326,'EPSG',2326,'PROJCS[\"HK1980\"]','')");
+    db.run("CREATE TABLE gpkg_contents (table_name TEXT PRIMARY KEY, data_type TEXT, identifier TEXT, description TEXT, last_change TEXT, min_x DOUBLE, min_y DOUBLE, max_x DOUBLE, max_y DOUBLE, srs_id INTEGER)");
+    db.run("CREATE TABLE gpkg_geometry_columns (table_name TEXT, column_name TEXT, geometry_type_name TEXT, srs_id INTEGER, z TINYINT, m TINYINT, PRIMARY KEY(table_name, column_name))");
+    function gpkgBlob(wkb, srs) {
+      const h = new Uint8Array(8 + wkb.length);
+      h[0] = 0x47; h[1] = 0x50; h[3] = 0x01;
+      new DataView(h.buffer).setInt32(4, srs, true);
+      h.set(wkb, 8);
+      return h;
+    }
+    function wkbPoly(rings) {
+      const points = rings.reduce((sum, ring) => sum + ring.length, 0);
+      const out = new Uint8Array(9 + rings.length * 4 + points * 16);
+      const v = new DataView(out.buffer);
+      v.setUint8(0, 1); v.setUint32(1, 3, true); v.setUint32(5, rings.length, true);
+      let off = 9;
+      rings.forEach(ring => {
+        v.setUint32(off, ring.length, true); off += 4;
+        ring.forEach(([x, y]) => { v.setFloat64(off, x, true); v.setFloat64(off + 8, y, true); off += 16; });
+      });
+      return out;
+    }
+    function wkbMulti(polys) {
+      const parts = polys.map(wkbPoly);
+      const out = new Uint8Array(9 + parts.reduce((sum, p) => sum + p.length, 0));
+      const v = new DataView(out.buffer);
+      v.setUint8(0, 1); v.setUint32(1, 6, true); v.setUint32(5, parts.length, true);
+      let off = 9;
+      parts.forEach(p => { out.set(p, off); off += p.length; });
+      return out;
+    }
+    function wkbPt(x, y) {
+      const out = new Uint8Array(21); const v = new DataView(out.buffer);
+      v.setUint8(0, 1); v.setUint32(1, 1, true); v.setFloat64(5, x, true); v.setFloat64(13, y, true);
+      return out;
+    }
+    if (areas.length) {
+      const hasMulti = areas.some(a => a.parts.length > 1);
+      db.run("CREATE TABLE areas (fid INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, geom BLOB)");
+      db.run("INSERT INTO gpkg_contents VALUES ('areas','features','areas','','',0,0,0,0," + areaSrs + ")");
+      db.run("INSERT INTO gpkg_geometry_columns VALUES ('areas','geom','" + (hasMulti ? "MULTIPOLYGON" : "POLYGON") + "'," + areaSrs + ",0,0)");
+      const st = db.prepare("INSERT INTO areas (name, geom) VALUES (?,?)");
+      areas.forEach(a => st.run([a.name, gpkgBlob(hasMulti ? wkbMulti(a.parts) : wkbPoly(a.parts[0]), areaSrs)]));
+      st.free();
+    }
+    const list = lastResults.length ? lastResults : trees;
+    if (list.length) {
+      const categories = (window.resultColumns && window.resultColumns.length) ? window.resultColumns : [];
+      const fields = categories.length ? categories.map(quoteIdent) : ['"area"'];
+      db.run("CREATE TABLE trees (fid INTEGER PRIMARY KEY AUTOINCREMENT, tree_no TEXT, " + fields.map(field => field + " TEXT").join(", ") + ", geom BLOB)");
+      db.run("INSERT INTO gpkg_contents VALUES ('trees','features','trees','','',0,0,0,0," + treeSrs + ")");
+      db.run("INSERT INTO gpkg_geometry_columns VALUES ('trees','geom','POINT'," + treeSrs + ",0,0)");
+      const placeholders = new Array(fields.length + 2).fill("?").join(",");
+      const st = db.prepare("INSERT INTO trees (tree_no, " + fields.join(", ") + ", geom) VALUES (" + placeholders + ")");
+      list.forEach(t => {
+        const attrs = categories.length
+          ? categories.map(name => (t.groups && t.groups[name]) || "")
+          : [t.area || ""];
+        st.run([t.treeNo].concat(attrs).concat([gpkgBlob(wkbPt(t.x, t.y), treeSrs)]));
+      });
+      st.free();
+    }
+    const data = db.export();
+    db.close();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([data], { type: "application/geopackage+sqlite3" }));
+    a.download = "tree_area_project.gpkg";
+    a.click();
+  } catch (err) {
+    document.getElementById("areaInfo").innerHTML = "匯出失敗：" + esc(err.message || err);
+  }
+});
+
+let searchTimer = null;
+document.getElementById("searchInput").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => applySearch(), 150);
+});
+document.getElementById("searchInput").addEventListener("keydown", ev => {
+  if (ev.key === "Enter") { ev.preventDefault(); applySearch(); }
+});
+document.getElementById("searchBtn").addEventListener("click", () => applySearch());
+document.getElementById("searchClearBtn").addEventListener("click", () => {
+  document.getElementById("searchInput").value = "";
+  applySearch();
+  const bounds = [];
+  areaPolys.forEach(item => bounds.push(item.poly.getBounds()));
+  treeMarkers.forEach(item => bounds.push(item.marker.getLatLng()));
+  if (bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [30, 30] });
+});
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+  trees = []; areas = []; sources = []; lastResults = []; areaNotes = [];
+  window.results = null;
+  window.resultColumns = null;
+  ["treeFile", "dxfFile", "areaCsvFile", "gpkgFile"].forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+  const paste = document.getElementById("treePaste");
+  if (paste) paste.value = "";
+  document.getElementById("treeInfo").innerHTML = "";
+  document.getElementById("areaInfo").innerHTML = "";
+  document.getElementById("resultTable").innerHTML = "";
+  document.getElementById("resultToolbar").innerHTML = "";
+  document.getElementById("resultCount").innerHTML = "";
+  document.getElementById("treeCopyMsg").textContent = "";
+  const searchInput = document.getElementById("searchInput");
+  if (searchInput) searchInput.value = "";
+  const searchInfo = document.getElementById("searchInfo");
+  if (searchInfo) searchInfo.textContent = "";
+  renderSources();
+  updateUI();
+  document.getElementById("downloadBtn").disabled = true;
+  clearMapLayers();
+  closeLayers(null);
+});
+</script>
+</body>
+</html>
