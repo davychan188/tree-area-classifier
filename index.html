@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木區域自動分類工具 v17</title>
+<title>樹木區域自動分類工具 v18</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
@@ -92,7 +92,7 @@
 </style>
 </head>
 <body>
-<h1>樹木區域自動分類工具 v17</h1>
+<h1>樹木區域自動分類工具 v18</h1>
 <p>每個區域檔的檔名會成為結果的一欄。若 DXF 內含 Tree Group 標籤（例如 Group867），結果欄會自動命名為 Tree_Group。同一檔內若重疊，採用先載入的區域。樹木座標可上傳或直接貼上 Tree_No、X、Y。</p>
 
 <div class="section">
@@ -467,7 +467,6 @@ function applySearch(opts) {
       if (item.label && !labelled.has(item.label)) {
         labelled.add(item.label);
         setLabelState(item.label, hit, searching);
-        if (searching && hit) item.label.bringToFront();
       }
     });
     treeMarkers.forEach(item => {
