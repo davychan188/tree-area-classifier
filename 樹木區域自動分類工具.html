@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>樹木區域自動分類工具 v15</title>
+<title>樹木區域自動分類工具 v16</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
@@ -56,6 +56,9 @@
 
   .search-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 4px; }
   .search-row input[type="search"] { flex: 1; min-width: 200px; max-width: none; min-height: 40px; font-size: 16px; }
+
+  .tg-toggle { display: flex; align-items: center; gap: 8px; font-weight: bold; min-height: 40px; margin: 0; cursor: pointer; user-select: none; }
+  .tg-toggle input { width: 20px; height: 20px; accent-color: #1e4d3a; flex-shrink: 0; }
   #searchInfo { margin-top: 4px; font-weight: bold; color: #1e4d3a; min-height: 1.2em; }
   tr.search-hit td { background: #f3e0c8; }
   tr.search-focus td { background: #f0c28a; }
@@ -88,7 +91,7 @@
 </style>
 </head>
 <body>
-<h1>樹木區域自動分類工具 v15</h1>
+<h1>樹木區域自動分類工具 v16</h1>
 <p>每個區域檔的檔名會成為結果的一欄。若 DXF 內含 Tree Group 標籤（例如 Group867），結果欄會自動命名為 Tree_Group。同一檔內若重疊，採用先載入的區域。樹木座標可上傳或直接貼上 Tree_No、X、Y。</p>
 
 <div class="section">
@@ -102,7 +105,7 @@
     <li>GeoPackage 會讀取 Polygon、MultiPolygon（含內環）；多圖層時先勾選</li>
     <li>分類使用檔案原始座標，地圖與 KML 才依所選座標系轉換</li>
     <li>可用搜尋欄輸入 Tree Group（例如 TG774、Group805）或 Tree No（例如 TG-T0078、0078），地圖會放大並標示，結果表亦會篩選</li>
-    <li>地圖上每個區域會直接顯示 TG 編號（例如 TG774），無需點擊；搜尋時配對到的編號會較大、較顯眼</li>
+    <li>地圖上每個區域可直接顯示 TG 編號（例如 TG774）。可用「顯示 TG 編號」勾選顯示或隱藏；搜尋時配對到的編號會較大、較顯眼</li>
   </ul>
 </div>
 
@@ -177,10 +180,11 @@ Group209,825100.5,840150.2</pre>
     <input type="search" id="searchInput" placeholder="例如 TG774、Group805、TG-T0078、0078" autocomplete="off" enterkeyhint="search">
     <button type="button" id="searchBtn">搜尋</button>
     <button type="button" id="searchClearBtn" class="secondary">清除搜尋</button>
+    <label class="tg-toggle" for="showTgLabels"><input type="checkbox" id="showTgLabels" checked>顯示 TG 編號</label>
   </div>
   <div id="searchInfo"></div>
   <div id="map"></div>
-  <p class="hint">區域會直接顯示 TG 編號。輸入組號或樹木編號後，地圖會標示並放大至結果。點擊結果表的列亦可定位該棵樹。可切換右上角圖層。</p>
+  <p class="hint">可用「顯示 TG 編號」選擇在地圖上顯示或隱藏組號。輸入組號或樹木編號後，地圖會標示並放大至結果。點擊結果表的列亦可定位該棵樹。可切換右上角圖層。</p>
 </div>
 
 <div class="section">
@@ -283,6 +287,28 @@ map.createPane("tgLabels");
 map.getPane("tgLabels").classList.add("tg-labels-pane");
 let areaLayer = L.layerGroup().addTo(map);
 let treeLayer = L.layerGroup().addTo(map);
+const TG_LABEL_PREF = "tree-area-classifier-show-tg-labels";
+function tgLabelsVisible() {
+  const el = document.getElementById("showTgLabels");
+  return !el || el.checked;
+}
+function applyTgLabelVisibility() {
+  const pane = map.getPane("tgLabels");
+  if (pane) pane.style.display = tgLabelsVisible() ? "" : "none";
+}
+function loadTgLabelPref() {
+  const el = document.getElementById("showTgLabels");
+  if (!el) return;
+  try {
+    if (localStorage.getItem(TG_LABEL_PREF) === "0") el.checked = false;
+    else el.checked = true;
+  } catch (e) {}
+  applyTgLabelVisibility();
+}
+function saveTgLabelPref() {
+  try { localStorage.setItem(TG_LABEL_PREF, tgLabelsVisible() ? "1" : "0"); } catch (e) {}
+}
+loadTgLabelPref();
 
 function toWGS84(x, y, crs) {
   if (crs === "4326") return [y, x];
@@ -526,6 +552,7 @@ function drawOnMap() {
     treeLayer.addLayer(marker);
     treeMarkers.push({ t: t, marker: marker });
   });
+  applyTgLabelVisibility();
   const q = (document.getElementById("searchInput") || {}).value || "";
   if (String(q).trim() && !isBarePrefix(q) && normText(q).length >= 2) applySearch();
   else if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] });
@@ -1559,6 +1586,11 @@ document.getElementById("exportGpkgBtn").addEventListener("click", async () => {
   } catch (err) {
     document.getElementById("areaInfo").innerHTML = "匯出失敗：" + esc(err.message || err);
   }
+});
+
+document.getElementById("showTgLabels").addEventListener("change", () => {
+  saveTgLabelPref();
+  applyTgLabelVisibility();
 });
 
 let searchTimer = null;
